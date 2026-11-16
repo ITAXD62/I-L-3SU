@@ -1,0 +1,842 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Diamond Ring - ItachiXD64</title>
+<style>
+  html, body {
+    margin: 0;
+    padding: 0;
+    width: 100%;
+    height: 100%;
+    background: #000;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    overflow: hidden;
+    user-select: none;
+  }
+  canvas {
+    max-width: 95vw;
+    max-height: 95vh;
+    object-fit: contain;
+    cursor: grab;
+    touch-action: none;
+  }
+  canvas:active {
+    cursor: grabbing;
+  }
+</style>
+</head>
+<body>
+<canvas id="screen" width="1080" height="960"></canvas>
+<script>
+const TAU = Math.PI * 2;
+const LOOP = 20.0;
+const BUILD = 3.2;
+const TURN = 12.0;
+const FLOOR = -0.78;
+
+const PHRASE = "I love you suha ";
+const CHARS = " .,:~+*^|/\\-_#()I love you suha";
+const AT = {};
+for (let i = 0; i < CHARS.length; i++) AT[CHARS[i]] = i;
+
+const BAND = 0, PRONG = 1, GEM = 2, GLINT = 3, FIRE_R = 4, FIRE_B = 5, FIRE_G = 6, DUST = 7, REFL = 8, STAR = 9;
+
+function smooth(x) {
+  x = Math.max(0, Math.min(1, x));
+  return x * x * (3 - 2 * x);
+}
+
+function mulberry32(a) {
+  return function() {
+    let t = a += 0x6D2B79F5;
+    t = Math.imul(t ^ t >>> 15, t | 1);
+    t ^= t + Math.imul(t ^ t >>> 7, t | 61);
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+
+const R_BAND = 0.55, TUBE = 0.065;
+
+function buildBand() {
+  const P = [], N = [];
+  for (let bi = 0; bi < 44; bi++) {
+    const b = TAU * bi / 44;
+    const cb = Math.cos(b), sb = Math.sin(b);
+    for (let ai = 0; ai < 520; ai++) {
+      const a = TAU * ai / 520;
+      const ca = Math.cos(a), sa = Math.sin(a);
+      const rr = TUBE * (1 - 0.35 * Math.pow(Math.max(0, sa), 6));
+      const nx = ca * cb, ny = sa * cb, nz = sb;
+      const len = Math.hypot(nx, ny, nz);
+      P.push(ca * R_BAND + nx * rr, sa * R_BAND + ny * rr, nz * rr * 1.5);
+      N.push(nx / len, ny / len, nz / len);
+    }
+  }
+  return { P: new Float32Array(P), N: new Float32Array(N), count: P.length / 3 };
+}
+
+const GIRDLE_Y = 0.88, GIRDLE_R = 0.25, TABLE_Y = 1.00, TABLE_R = 0.135, CULET_Y = 0.66;
+
+function buildDiamond() {
+  const P = [], N = [], F = [];
+  let k = 0;
+
+  function cross(ax, ay, az, bx, by, bz) {
+    return [ay * bz - az * by, az * bx - ax * bz, ax * by - ay * bx];
+  }
+
+  function facet(a, b, c, n) {
+    const len = Math.hypot(n[0], n[1], n[2]);
+    const nx = n[0] / len, ny = n[1] / len, nz = n[2] / len;
+    for (let vi = 0; vi < 16; vi++) {
+      const v = vi / 15;
+      for (let ui = 0; ui < 16; ui++) {
+        const u = ui / 15;
+        if (u + v <= 1.00001) {
+          P.push(
+            a[0] + (b[0] - a[0]) * u + (c[0] - a[0]) * v,
+            a[1] + (b[1] - a[1]) * u + (c[1] - a[1]) * v,
+            a[2] + (b[2] - a[2]) * u + (c[2] - a[2]) * v
+          );
+          N.push(nx, ny, nz);
+          F.push(k);
+        }
+      }
+    }
+    k++;
+  }
+
+  const m = 16;
+  for (let i = 0; i < m; i++) {
+    const a0 = TAU * i / m, a1 = TAU * (i + 1) / m;
+    const g0 = [GIRDLE_R * Math.cos(a0), GIRDLE_Y, GIRDLE_R * Math.sin(a0)];
+    const g1 = [GIRDLE_R * Math.cos(a1), GIRDLE_Y, GIRDLE_R * Math.sin(a1)];
+    const t0 = [TABLE_R * Math.cos(a0), TABLE_Y, TABLE_R * Math.sin(a0)];
+    const t1 = [TABLE_R * Math.cos(a1), TABLE_Y, TABLE_R * Math.sin(a1)];
+    const culet = [0, CULET_Y, 0];
+
+    let crown = cross(g1[0] - g0[0], g1[1] - g0[1], g1[2] - g0[2], t0[0] - g0[0], t0[1] - g0[1], t0[2] - g0[2]);
+    const s1 = Math.sign(crown[1]) || 1;
+    crown = [crown[0] * s1, crown[1] * s1, crown[2] * s1];
+    facet(g0, g1, t0, crown);
+    facet(g1, t1, t0, [crown[0], crown[1] * 1.15, crown[2]]);
+
+    let pav = cross(culet[0] - g0[0], culet[1] - g0[1], culet[2] - g0[2], g1[0] - g0[0], g1[1] - g0[1], g1[2] - g0[2]);
+    const s2 = -(Math.sign(pav[1]) || 1);
+    pav = [pav[0] * s2, pav[1] * s2, pav[2] * s2];
+    facet(g0, g1, culet, pav);
+    facet([0, TABLE_Y, 0], t0, t1, [0, 1.0, 0]);
+  }
+  return { P: new Float32Array(P), N: new Float32Array(N), F: new Int32Array(F), count: F.length };
+}
+
+function buildProngs() {
+  const P = [], N = [];
+  for (let i = 0; i < 4; i++) {
+    const a = TAU * (i + 0.5) / 4;
+    const bx = 0.08 * Math.cos(a), by = R_BAND + 0.02, bz = 0.08 * Math.sin(a);
+    const tx = (GIRDLE_R + 0.015) * Math.cos(a), ty = TABLE_Y - 0.03, tz = (GIRDLE_R + 0.015) * Math.sin(a);
+    const vx = tx - bx, vy = ty - by, vz = tz - bz;
+    const vl = Math.hypot(vx, vy, vz);
+    const dx = vx / vl, dy = vy / vl, dz = vz / vl;
+    let sx = dy, sy = -dx, sz = 0;
+    const sl = Math.hypot(sx, sy, sz);
+    sx /= sl; sy /= sl;
+    const wx = sy * dz - sz * dy, wy = sz * dx - sx * dz, wz = sx * dy - sy * dx;
+
+    for (let pi = 0; pi < 12; pi++) {
+      const phi = TAU * pi / 12;
+      const cp = Math.cos(phi), sp = Math.sin(phi);
+      const nx = cp * sx + sp * wx, ny = cp * sy + sp * wy, nz = cp * sz + sp * wz;
+      for (let ui = 0; ui < 40; ui++) {
+        const u = ui / 39;
+        P.push(bx + u * vx + nx * 0.022, by + u * vy + ny * 0.022, bz + u * vz + nz * 0.022);
+        N.push(nx, ny, nz);
+      }
+    }
+  }
+  return { P: new Float32Array(P), N: new Float32Array(N), count: P.length / 3 };
+}
+
+const bandData = buildBand();
+const gemData = buildDiamond();
+const prongData = buildProngs();
+
+const RING_COUNT = bandData.count + prongData.count + gemData.count;
+const RING_P = new Float32Array(RING_COUNT * 3);
+const RING_N = new Float32Array(RING_COUNT * 3);
+const RING_PART = new Int32Array(RING_COUNT);
+const RING_KIND = new Int32Array(RING_COUNT);
+const GEM_F_ALL = new Int32Array(RING_COUNT);
+
+RING_P.set(bandData.P, 0);
+RING_P.set(prongData.P, bandData.count * 3);
+RING_P.set(gemData.P, (bandData.count + prongData.count) * 3);
+
+RING_N.set(bandData.N, 0);
+RING_N.set(prongData.N, bandData.count * 3);
+RING_N.set(gemData.N, (bandData.count + prongData.count) * 3);
+
+for (let i = 0; i < bandData.count; i++) {
+  RING_PART[i] = 0;
+  RING_KIND[i] = BAND;
+}
+for (let i = 0; i < prongData.count; i++) {
+  const idx = bandData.count + i;
+  RING_PART[idx] = 1;
+  RING_KIND[idx] = PRONG;
+}
+for (let i = 0; i < gemData.count; i++) {
+  const idx = bandData.count + prongData.count + i;
+  RING_PART[idx] = 10 + gemData.F[i];
+  RING_KIND[idx] = GEM;
+  GEM_F_ALL[idx] = gemData.F[i];
+}
+
+const ORDER = new Float32Array(RING_COUNT);
+let ORDER_MAX = 0;
+for (let i = 0; i < RING_COUNT; i++) {
+  const px = RING_P[i * 3], py = RING_P[i * 3 + 1];
+  const kind = RING_KIND[i];
+  let val;
+  if (kind === BAND) {
+    let ang = Math.atan2(py, px) + Math.PI / 2;
+    ang = Math.atan2(Math.sin(ang), Math.cos(ang));
+    val = Math.abs(ang) / Math.PI;
+  } else if (kind === PRONG) {
+    val = 1.0 + (py - R_BAND) / (TABLE_Y - R_BAND) * 0.25;
+  } else {
+    val = 1.25 + (py - CULET_Y) / (TABLE_Y - CULET_Y) * 0.45;
+  }
+  ORDER[i] = val;
+  if (val > ORDER_MAX) ORDER_MAX = val;
+}
+
+const DRAW = [0.3, 5.6];
+
+function randArr(seed, len) {
+  const r = mulberry32(seed);
+  const a = new Float32Array(len);
+  for (let i = 0; i < len; i++) a[i] = r();
+  return a;
+}
+
+const SPK = randArr(13, 2600 * 5);
+const SPK_IDX = new Int32Array(2600);
+const SPK_BORN = new Float32Array(2600);
+for (let i = 0; i < 2600; i++) {
+  SPK_IDX[i] = Math.floor(SPK[i * 5] * RING_COUNT);
+  SPK_BORN[i] = DRAW[0] + ORDER[SPK_IDX[i]] / ORDER_MAX * (DRAW[1] - DRAW[0]);
+}
+
+const BURST = randArr(14, 700 * 3);
+const HALO = randArr(15, 900 * 2);
+const DUSTS = randArr(5, 520 * 4);
+const STARS = randArr(2, 90 * 3);
+
+const eye = [0.0, 0.85, 4.7];
+const target = [0, 0.22, 0];
+let fwd = [target[0] - eye[0], target[1] - eye[1], target[2] - eye[2]];
+const fl = Math.hypot(fwd[0], fwd[1], fwd[2]);
+fwd = [fwd[0] / fl, fwd[1] / fl, fwd[2] / fl];
+let right = [-fwd[2], 0, fwd[0]];
+const rl = Math.hypot(right[0], right[1], right[2]);
+right = [right[0] / rl, right[1] / rl, right[2] / rl];
+const up = [
+  right[1] * fwd[2] - right[2] * fwd[1],
+  right[2] * fwd[0] - right[0] * fwd[2],
+  right[0] * fwd[1] - right[1] * fwd[0]
+];
+const viewDir = [-fwd[0], -fwd[1], -fwd[2]];
+
+function phraseChar(r, c, t) {
+  const shift = Math.floor(t * 3);
+  const idx = ((c + r * 3 + shift) % PHRASE.length + PHRASE.length) % PHRASE.length;
+  const ch = PHRASE[idx];
+  return ch === " " ? AT["·"] || AT["."] : AT[ch];
+}
+
+const CW = 6, CH = 9, FONT_PX = 10;
+const W = 1080, H = 960;
+const COLS = Math.floor(W / CW), ROWS = Math.floor(H / CH);
+const ASPECT = (COLS * CW) / (ROWS * CH);
+const TRAIL = 0.5;
+
+const COLORS = [
+  [255, 215, 70],
+  [255, 225, 100],
+  [50, 160, 255],
+  [180, 230, 255],
+  [80, 190, 255],
+  [30, 120, 255],
+  [120, 210, 255],
+  [255, 214, 140],
+  [180, 150, 60],
+  [120, 120, 140]
+];
+const DIM = "rgb(110, 104, 120)";
+const PINK = "rgb(255, 122, 182)";
+const MONO = "Consolas, Menlo, 'DejaVu Sans Mono', 'Courier New', monospace";
+
+const TOTAL_MAX = RING_COUNT * 2 + 520 + 90 + 2600 + 700 + 900;
+const P_BUF = new Float32Array(TOTAL_MAX * 3);
+const S_BUF = new Float32Array(TOTAL_MAX);
+const T_BUF = new Int32Array(TOTAL_MAX);
+const K_BUF = new Int32Array(TOTAL_MAX);
+const SX_BUF = new Float32Array(TOTAL_MAX);
+const SY_BUF = new Float32Array(TOTAL_MAX);
+const Z_BUF = new Float32Array(TOTAL_MAX);
+const ORDER_IDX = new Int32Array(TOTAL_MAX);
+
+const partGrid = new Int32Array(ROWS * COLS);
+const depthGrid = new Float32Array(ROWS * COLS);
+const lumGrid = new Float32Array(ROWS * COLS);
+const tagGrid = new Int32Array(ROWS * COLS);
+const charGrid = new Int32Array(ROWS * COLS);
+
+let userYaw = 0.0;
+let userPitch = 0.0;
+let userZoom = 1.0;
+let autoRotate = true;
+let isDragging = false;
+let lastMouseX = 0;
+let lastMouseY = 0;
+
+function frame(t) {
+  const autoYaw = autoRotate ? (TAU * Math.max(t - DRAW[1] - 0.6, 0) / TURN) : 0;
+  const yaw = autoYaw + userYaw;
+  const pitch = userPitch;
+
+  const cyaw = Math.cos(yaw), syaw = Math.sin(yaw);
+  const cpitch = Math.cos(pitch), spitch = Math.sin(pitch);
+  const head = (t - DRAW[0]) / (DRAW[1] - DRAW[0]) * ORDER_MAX;
+
+  let key = [0.0, 0.8, 0.6];
+  const kl = Math.hypot(key[0], key[1], key[2]);
+  key = [key[0] / kl, key[1] / kl, key[2] / kl];
+
+  let rim = [Math.cos(t * 0.9), 0.5, Math.sin(t * 0.9)];
+  const rml = Math.hypot(rim[0], rim[1], rim[2]);
+  rim = [rim[0] / rml, rim[1] / rml, rim[2] / rml];
+
+  let hk = [key[0] + viewDir[0], key[1] + viewDir[1], key[2] + viewDir[2]];
+  const hkl = Math.hypot(hk[0], hk[1], hk[2]);
+  hk = [hk[0] / hkl, hk[1] / hkl, hk[2] / hkl];
+
+  let hr = [rim[0] + viewDir[0], rim[1] + viewDir[1], rim[2] + viewDir[2]];
+  const hrl = Math.hypot(hr[0], hr[1], hr[2]);
+  hr = [hr[0] / hrl, hr[1] / hrl, hr[2] / hrl];
+
+  const fls = 1 + 0.8 * Math.exp(-Math.pow((t - DRAW[1] - 0.15) / 0.18, 2));
+  const t7 = Math.floor(t * 7);
+  let glintsCount = 0;
+  let ptr = 0;
+
+  const pivotY = 0.25;
+
+  for (let i = 0; i < RING_COUNT; i++) {
+    const px = RING_P[i * 3], py = RING_P[i * 3 + 1] - pivotY, pz = RING_P[i * 3 + 2];
+
+    const yx = cyaw * px + syaw * pz;
+    const yy = py;
+    const yz = -syaw * px + cyaw * pz;
+
+    const bx = yx;
+    const by = (cpitch * yy - spitch * yz) + pivotY;
+    const bz = spitch * yy + cpitch * yz;
+
+    const nx0 = RING_N[i * 3], ny0 = RING_N[i * 3 + 1], nz0 = RING_N[i * 3 + 2];
+    const nyx = cyaw * nx0 + syaw * nz0;
+    const nyy = ny0;
+    const nyz = -syaw * nx0 + cyaw * nz0;
+
+    const nx = nyx;
+    const ny = cpitch * nyy - spitch * nyz;
+    const nz = spitch * nyy + cpitch * nyz;
+
+    const k = smooth((head - ORDER[i]) / 0.06);
+    const tip = Math.abs(head - ORDER[i]) < 0.035;
+
+    const diff = Math.max(0, nx * key[0] + ny * key[1] + nz * key[2]);
+    const specK = Math.max(0, nx * hk[0] + ny * hk[1] + nz * hk[2]);
+    const specR = Math.max(0, nx * hr[0] + ny * hr[1] + nz * hr[2]);
+    const spec = Math.pow(specK, 30) + 0.9 * Math.pow(specR, 24);
+
+    const rKind = RING_KIND[i];
+    const metal = rKind !== GEM;
+    let shade = metal ? (0.5 + 0.35 * diff + 0.9 * spec) : (0.8 + 0.2 * diff + 1.4 * spec);
+    let kind = rKind;
+
+    const isGlint = !metal && spec > 0.18;
+    if (isGlint) {
+      glintsCount++;
+      const fire = (GEM_F_ALL[i] + t7) % 4;
+      kind = fire === 0 ? GLINT : (fire === 1 ? FIRE_R : (fire === 2 ? FIRE_B : FIRE_G));
+    } else if (metal && spec > 0.5) {
+      kind = GLINT;
+    }
+
+    let part = RING_PART[i];
+    if (k < 0.96) {
+      part = -2;
+      shade = tip ? 1.2 : 0.0;
+      kind = tip ? GLINT : DUST;
+    }
+
+    P_BUF[ptr * 3] = bx;
+    P_BUF[ptr * 3 + 1] = by;
+    P_BUF[ptr * 3 + 2] = bz;
+    S_BUF[ptr] = shade * fls;
+    T_BUF[ptr] = kind;
+    K_BUF[ptr] = part;
+    ptr++;
+
+    P_BUF[ptr * 3] = bx;
+    P_BUF[ptr * 3 + 1] = 2 * FLOOR - by - 0.06;
+    P_BUF[ptr * 3 + 2] = bz;
+    S_BUF[ptr] = k >= 0.96 ? 0.22 * Math.max(0, Math.min(1.2, shade)) : 0;
+    T_BUF[ptr] = REFL;
+    K_BUF[ptr] = -1;
+    ptr++;
+  }
+
+  const dustFade = smooth((t - BUILD + 0.5) / 1.5);
+  for (let i = 0; i < 520; i++) {
+    const d0 = DUSTS[i * 4], d1 = DUSTS[i * 4 + 1], d2 = DUSTS[i * 4 + 2], d3 = DUSTS[i * 4 + 3];
+    const a = d0 * TAU + t * (0.3 + 0.5 * d1);
+    const r = 0.9 + 0.8 * d2;
+    const y = ((d3 * 2.4 + t * 0.08) % 2.4) - 0.8;
+    const tw = 0.25 + 0.75 * Math.pow(Math.max(0, Math.sin(t * (2 + 3 * d1) + d0 * 40)), 4);
+    P_BUF[ptr * 3] = Math.cos(a) * r;
+    P_BUF[ptr * 3 + 1] = y;
+    P_BUF[ptr * 3 + 2] = Math.sin(a) * r * 0.7;
+    S_BUF[ptr] = tw * dustFade;
+    T_BUF[ptr] = DUST;
+    K_BUF[ptr] = -1;
+    ptr++;
+  }
+
+  for (let i = 0; i < 90; i++) {
+    P_BUF[ptr * 3] = STARS[i * 3] * 10 - 5;
+    P_BUF[ptr * 3 + 1] = STARS[i * 3 + 1] * 6 - 1.5;
+    P_BUF[ptr * 3 + 2] = -6.0;
+    S_BUF[ptr] = 0.1 + 0.1 * Math.sin(t * 2 + STARS[i * 3 + 2] * TAU);
+    T_BUF[ptr] = STAR;
+    K_BUF[ptr] = -1;
+    ptr++;
+  }
+
+  for (let i = 0; i < 2600; i++) {
+    const age = t - SPK_BORN[i];
+    const s1 = SPK[i * 5 + 1], s2 = SPK[i * 5 + 2], s3 = SPK[i * 5 + 3], s4 = SPK[i * 5 + 4];
+    const life = 0.9 + 0.9 * s1;
+    if (age > 0 && age < life) {
+      const a = s2 * TAU;
+      const vx = Math.cos(a) * (0.4 + 0.6 * s3);
+      const vy = 0.5 + 0.9 * s4;
+      const vz = Math.sin(a) * (0.4 + 0.6 * s3);
+      const idx = SPK_IDX[i];
+      P_BUF[ptr * 3] = RING_P[idx * 3] + vx * age;
+      P_BUF[ptr * 3 + 1] = RING_P[idx * 3 + 1] + vy * age - 1.1 * age * age;
+      P_BUF[ptr * 3 + 2] = RING_P[idx * 3 + 2] + vz * age;
+      S_BUF[ptr] = Math.pow(Math.max(0, 1 - age / life), 1.3) * (0.6 + 0.4 * Math.sin(age * 30 + a));
+      T_BUF[ptr] = s3 > 0.7 ? GLINT : DUST;
+      K_BUF[ptr] = -1;
+      ptr++;
+    }
+  }
+
+  const bk = t - DRAW[1] - 0.1;
+  if (bk >= 0 && bk <= 2.2) {
+    const bglow = Math.pow(Math.max(0, 1 - bk / 2.2), 1.5);
+    const exp = 2.4 * (1 - Math.exp(-bk * 2.0));
+    for (let i = 0; i < 700; i++) {
+      const b0 = BURST[i * 3], b1 = BURST[i * 3 + 1], b2 = BURST[i * 3 + 2];
+      const a = b0 * TAU;
+      const r = 0.85 + exp * (0.97 + 0.06 * b1);
+      P_BUF[ptr * 3] = Math.cos(a) * r;
+      P_BUF[ptr * 3 + 1] = 0.42 + Math.sin(a) * r;
+      P_BUF[ptr * 3 + 2] = (b2 - 0.5) * 0.05 - 0.4;
+      S_BUF[ptr] = bglow;
+      T_BUF[ptr] = b1 < 0.25 ? FIRE_R : (b1 < 0.45 ? FIRE_B : (b1 < 0.6 ? FIRE_G : GLINT));
+      K_BUF[ptr] = -1;
+      ptr++;
+    }
+  }
+
+  const hon = smooth((t - DRAW[1] - 0.3) / 1.5);
+  if (hon > 0) {
+    const half = 450;
+    for (let side = 0; side < 2; side++) {
+      const tilt = side === 0 ? 0.55 : -0.55;
+      const ct = Math.cos(tilt), st = Math.sin(tilt);
+      const dir = side === 0 ? 0.9 : -0.7;
+      for (let i = 0; i < half; i++) {
+        const hi = side * half + i;
+        const h0 = HALO[hi * 2], h1 = HALO[hi * 2 + 1];
+        const a = h0 * TAU + t * dir;
+        const x = Math.cos(a) * 1.05, y = Math.sin(a) * 0.32, z = Math.sin(a) * 0.95;
+        const headH = (h0 * 37 + t * 1.3) % 1.0;
+        const glow = hon * (0.15 + 0.85 * Math.max(0, 1 - headH * 3)) * (0.6 + 0.4 * Math.sin(t * 6 + h1 * TAU));
+        P_BUF[ptr * 3] = x * ct - y * st;
+        P_BUF[ptr * 3 + 1] = x * st + y * ct + 0.42;
+        P_BUF[ptr * 3 + 2] = z;
+        S_BUF[ptr] = glow;
+        T_BUF[ptr] = h1 > 0.5 ? DUST : GLINT;
+        K_BUF[ptr] = -1;
+        ptr++;
+      }
+    }
+  }
+
+  const F = 2.9 * userZoom;
+  for (let i = 0; i < ptr; i++) {
+    const rx = P_BUF[i * 3] - eye[0];
+    const ry = P_BUF[i * 3 + 1] - eye[1];
+    const rz = P_BUF[i * 3 + 2] - eye[2];
+    const x = rx * right[0] + ry * right[1] + rz * right[2];
+    const y = rx * up[0] + ry * up[1] + rz * up[2];
+    const z = rx * fwd[0] + ry * fwd[1] + rz * fwd[2];
+    const zz = Math.max(z, 0.2);
+    SX_BUF[i] = (0.5 + x / zz * F * 0.5) * COLS;
+    SY_BUF[i] = (0.5 - y / zz * F * 0.5 * ASPECT) * ROWS;
+    Z_BUF[i] = z;
+    ORDER_IDX[i] = i;
+  }
+
+  const activeOrder = ORDER_IDX.subarray(0, ptr);
+  activeOrder.sort((a, b) => Z_BUF[b] - Z_BUF[a]);
+
+  partGrid.fill(-1);
+  depthGrid.fill(99.0);
+  lumGrid.fill(0);
+  tagGrid.fill(0);
+  charGrid.fill(0);
+
+  for (let idx = 0; idx < ptr; idx++) {
+    const i = activeOrder[idx];
+    const z = Z_BUF[i];
+    if (z <= 0.2) continue;
+    const ix = Math.floor(SX_BUF[i]);
+    const iy = Math.floor(SY_BUF[i]);
+    if (ix < 0 || ix >= COLS || iy < 0 || iy >= ROWS) continue;
+    const k = K_BUF[i];
+    if (k >= 0) {
+      const cell = iy * COLS + ix;
+      partGrid[cell] = k;
+      depthGrid[cell] = z;
+      lumGrid[cell] = S_BUF[i];
+      tagGrid[cell] = T_BUF[i];
+    }
+  }
+
+  let bodyCount = 0;
+  const sparkleCells = [];
+
+  for (let r = 0; r < ROWS; r++) {
+    for (let c = 0; c < COLS; c++) {
+      const cell = r * COLS + c;
+      const p = partGrid[cell];
+      if (p < 0) continue;
+      bodyCount++;
+      const d = depthGrid[cell];
+      let edge = false;
+
+      for (let dy = -1; dy <= 1; dy++) {
+        for (let dx = -1; dx <= 1; dx++) {
+          if (dx === 0 && dy === 0) continue;
+          const nr = r + dy, nc = c + dx;
+          let nb = -1, nz = 99.0;
+          if (nr >= 0 && nr < ROWS && nc >= 0 && nc < COLS) {
+            const ncell = nr * COLS + nc;
+            nb = partGrid[ncell];
+            nz = depthGrid[ncell];
+          }
+          if (nb < 0 || (nb !== p && nz > d + 0.02)) {
+            if (dx === 0 || dy === 0) edge = true;
+          }
+        }
+      }
+
+      const l = lumGrid[cell];
+      const tg = tagGrid[cell];
+      const isSparkle = tg === GLINT || tg === FIRE_R || tg === FIRE_B || tg === FIRE_G;
+      const h = (r * 7919 + c * 104729) % 9973;
+
+      charGrid[cell] = phraseChar(r, c, t);
+
+      if (isSparkle) {
+        sparkleCells.push({ cell, r, c, score: l + (h % 7) * 0.01 });
+      }
+
+      lumGrid[cell] = edge ? Math.max(0.85, l) : Math.max(0.35, Math.min(1.0, l));
+    }
+  }
+
+  for (let idx = 0; idx < ptr; idx++) {
+    const i = activeOrder[idx];
+    const z = Z_BUF[i];
+    if (z <= 0.2) continue;
+    const k = K_BUF[i];
+    const fs = S_BUF[i];
+    if (k >= 0 || fs <= 0.02) continue;
+    const ix = Math.floor(SX_BUF[i]);
+    const iy = Math.floor(SY_BUF[i]);
+    if (ix < 0 || ix >= COLS || iy < 0 || iy >= ROWS) continue;
+    const cell = iy * COLS + ix;
+    if (partGrid[cell] >= 0) continue;
+
+    const ft = T_BUF[i];
+    let letter;
+    if (ft === REFL) {
+      letter = phraseChar(iy, ix, t);
+    } else if (ft === DUST) {
+      letter = fs > 0.7 ? AT["*"] : (fs > 0.35 ? AT["+"] : AT["."]);
+    } else if (ft === STAR) {
+      letter = AT["."];
+    } else {
+      letter = phraseChar(iy, ix, t);
+    }
+    charGrid[cell] = letter;
+    lumGrid[cell] = Math.max(0, Math.min(1, fs));
+    tagGrid[cell] = ft;
+  }
+
+  sparkleCells.sort((a, b) => b.score - a.score);
+  const top6 = sparkleCells.slice(0, 6);
+  const cardDirs = [[0, 1, "-"], [0, -1, "-"], [1, 0, "|"], [-1, 0, "|"]];
+  const diagDirs = [[1, 1, "\\"], [-1, -1, "\\"], [1, -1, "/"], [-1, 1, "/"]];
+
+  for (let n = 0; n < top6.length; n++) {
+    const item = top6[n];
+    if (item.score <= 0) break;
+    const cy = item.r, cx = item.c;
+    const pulse = 0.5 + 0.5 * Math.sin(t * 7 + n * 1.7);
+    const reach = Math.floor(5 + 9 * pulse);
+    for (let dist = 1; dist <= reach; dist++) {
+      const fade = 1 - dist / (reach + 1);
+      for (let d = 0; d < 4; d++) {
+        const yy = cy + cardDirs[d][0] * dist;
+        const xx = cx + cardDirs[d][1] * dist * 2;
+        if (yy >= 0 && yy < ROWS && xx >= 0 && xx < COLS) {
+          const cell = yy * COLS + xx;
+          if (lumGrid[cell] < fade) {
+            charGrid[cell] = AT[cardDirs[d][2]];
+            lumGrid[cell] = fade;
+            tagGrid[cell] = GLINT;
+          }
+        }
+      }
+      if (dist <= Math.floor(reach / 2)) {
+        for (let d = 0; d < 4; d++) {
+          const yy = cy + diagDirs[d][0] * dist;
+          const xx = cx + diagDirs[d][1] * dist;
+          if (yy >= 0 && yy < ROWS && xx >= 0 && xx < COLS) {
+            const cell = yy * COLS + xx;
+            if (lumGrid[cell] < fade * 0.7) {
+              charGrid[cell] = AT[diagDirs[d][2]];
+              lumGrid[cell] = fade * 0.7;
+              tagGrid[cell] = GLINT;
+            }
+          }
+        }
+      }
+    }
+    charGrid[item.cell] = AT["*"];
+    lumGrid[item.cell] = 1.0;
+  }
+
+  return {
+    deg: ((yaw * 180 / Math.PI) % 360 + 360) % 360,
+    glints: glintsCount,
+    count: bodyCount
+  };
+}
+
+const screenCanvas = document.getElementById("screen");
+const screenCtx = screenCanvas.getContext("2d");
+
+const shapeCanvas = document.createElement("canvas");
+shapeCanvas.width = W;
+shapeCanvas.height = H;
+const shapeCtx = shapeCanvas.getContext("2d");
+
+const trailCanvas = document.createElement("canvas");
+trailCanvas.width = W;
+trailCanvas.height = H;
+const trailCtx = trailCanvas.getContext("2d");
+trailCtx.fillStyle = "#000";
+trailCtx.fillRect(0, 0, W, H);
+
+const blur1Canvas = document.createElement("canvas");
+blur1Canvas.width = W / 4;
+blur1Canvas.height = H / 4;
+const blur1Ctx = blur1Canvas.getContext("2d");
+
+const blur2Canvas = document.createElement("canvas");
+blur2Canvas.width = W / 8;
+blur2Canvas.height = H / 8;
+const blur2Ctx = blur2Canvas.getContext("2d");
+
+function drawCanvas(t) {
+  const info = frame(t);
+  shapeCtx.fillStyle = "#000";
+  shapeCtx.fillRect(0, 0, W, H);
+
+  for (let r = 0; r < ROWS; r++) {
+    for (let c = 0; c < COLS; c++) {
+      const cell = r * COLS + c;
+      const ch = charGrid[cell];
+      const l = lumGrid[cell];
+      if (ch === 0 || l <= 0.01) continue;
+      const col = COLORS[Math.min(tagGrid[cell], COLORS.length - 1)];
+      const cr = Math.floor(col[0] * l);
+      const cg = Math.floor(col[1] * l);
+      const cb = Math.floor(col[2] * l);
+      shapeCtx.fillStyle = `rgb(${cr},${cg},${cb})`;
+      shapeCtx.font = `bold ${FONT_PX}px ${MONO}`;
+      shapeCtx.textAlign = "center";
+      shapeCtx.textBaseline = "middle";
+      shapeCtx.fillText(CHARS[ch], c * CW + CW / 2, r * CH + CH / 2 + 1);
+    }
+  }
+
+  trailCtx.globalCompositeOperation = "multiply";
+  trailCtx.fillStyle = `rgb(${Math.floor(TRAIL * 255)},${Math.floor(TRAIL * 255)},${Math.floor(TRAIL * 255)})`;
+  trailCtx.fillRect(0, 0, W, H);
+
+  trailCtx.globalCompositeOperation = "lighten";
+  trailCtx.drawImage(shapeCanvas, 0, 0);
+  trailCtx.globalCompositeOperation = "source-over";
+
+  return info;
+}
+
+let t = 0.0;
+let paused = false;
+let lastTime = performance.now();
+let info = drawCanvas(t);
+
+screenCanvas.addEventListener("pointerdown", e => {
+  isDragging = true;
+  autoRotate = false;
+  lastMouseX = e.clientX;
+  lastMouseY = e.clientY;
+  screenCanvas.setPointerCapture(e.pointerId);
+});
+
+screenCanvas.addEventListener("pointermove", e => {
+  if (!isDragging) return;
+  const dx = e.clientX - lastMouseX;
+  const dy = e.clientY - lastMouseY;
+  lastMouseX = e.clientX;
+  lastMouseY = e.clientY;
+
+  userYaw += dx * 0.008;
+  userPitch = Math.max(-1.4, Math.min(1.4, userPitch + dy * 0.008));
+
+  if (paused) info = drawCanvas(t);
+});
+
+screenCanvas.addEventListener("pointerup", e => {
+  isDragging = false;
+  screenCanvas.releasePointerCapture(e.pointerId);
+});
+
+screenCanvas.addEventListener("wheel", e => {
+  e.preventDefault();
+  userZoom = Math.max(0.4, Math.min(2.5, userZoom - e.deltaY * 0.001));
+  if (paused) info = drawCanvas(t);
+}, { passive: false });
+
+window.addEventListener("keydown", e => {
+  if (e.code === "Space") {
+    paused = !paused;
+  } else if (e.code === "KeyR") {
+    t = 0.0;
+    userYaw = 0.0;
+    userPitch = 0.0;
+    userZoom = 1.0;
+    autoRotate = true;
+    trailCtx.fillStyle = "#000";
+    trailCtx.fillRect(0, 0, W, H);
+  } else if (e.code === "KeyA") {
+    autoRotate = !autoRotate;
+  } else if (e.code === "KeyS") {
+    const link = document.createElement("a");
+    link.download = `diamond_ring_${Math.floor(Date.now() / 1000)}.png`;
+    link.href = screenCanvas.toDataURL();
+    link.click();
+  } else if (e.code === "ArrowLeft") {
+    autoRotate = false;
+    userYaw -= 0.1;
+  } else if (e.code === "ArrowRight") {
+    autoRotate = false;
+    userYaw += 0.1;
+  } else if (e.code === "ArrowUp") {
+    autoRotate = false;
+    userPitch = Math.max(-1.4, userPitch - 0.1);
+  } else if (e.code === "ArrowDown") {
+    autoRotate = false;
+    userPitch = Math.min(1.4, userPitch + 0.1);
+  }
+});
+
+function render(now) {
+  const dt = (now - lastTime) / 1000;
+  lastTime = now;
+
+  if (dt >= 1 / 35) {
+    if (!paused) {
+      t += Math.min(dt, 1 / 15);
+      if (t > LOOP) {
+        t = 0.0;
+        trailCtx.fillStyle = "#000";
+        trailCtx.fillRect(0, 0, W, H);
+      }
+      info = drawCanvas(t);
+    }
+
+    screenCtx.globalCompositeOperation = "source-over";
+    screenCtx.fillStyle = "#000";
+    screenCtx.fillRect(0, 0, W, H);
+    screenCtx.drawImage(trailCanvas, 0, 0);
+
+    blur1Ctx.clearRect(0, 0, blur1Canvas.width, blur1Canvas.height);
+    blur1Ctx.filter = "blur(2px)";
+    blur1Ctx.drawImage(trailCanvas, 0, 0, blur1Canvas.width, blur1Canvas.height);
+
+    blur2Ctx.clearRect(0, 0, blur2Canvas.width, blur2Canvas.height);
+    blur2Canvas.filter = "blur(3px)";
+    blur2Ctx.drawImage(trailCanvas, 0, 0, blur2Canvas.width, blur2Canvas.height);
+
+    screenCtx.globalCompositeOperation = "lighter";
+    screenCtx.globalAlpha = 0.75;
+    screenCtx.drawImage(blur1Canvas, 0, 0, W, H);
+
+    screenCtx.globalAlpha = 0.45;
+    screenCtx.drawImage(blur2Canvas, 0, 0, W, H);
+
+    screenCtx.globalCompositeOperation = "source-over";
+    screenCtx.globalAlpha = 1.0;
+
+    screenCtx.font = `17px ${MONO}`;
+    screenCtx.textAlign = "left";
+    screenCtx.textBaseline = "top";
+
+    const y = H - 70;
+    screenCtx.fillStyle = "rgb(120, 112, 128)";
+    screenCtx.fillText("ItachiXD64", 64, y - 26);
+
+  }
+
+  requestAnimationFrame(render);
+}
+
+requestAnimationFrame(render);
+</script>
+</body>
+</html>
